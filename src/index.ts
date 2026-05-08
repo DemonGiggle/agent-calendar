@@ -70,8 +70,9 @@ function createCalendarTools(params: {
   defaultAgendaLimit: number;
   timezone: string;
   detectionMode: "confirm_first" | "auto_save_high_confidence";
+  inboundContext?: { conversationId?: string; senderId?: string };
 }): AnyAgentTool[] {
-  const scope = resolveOwnerScope(params.toolContext);
+  const scope = resolveOwnerScope(params.toolContext, params.inboundContext);
 
   const createToolResult = async (entry: CalendarEntry) => {
     const nextEntry = await upsertReminder({
@@ -324,6 +325,7 @@ export default definePluginEntry({
   configSchema: buildJsonPluginConfigSchema(calendarPluginConfigJsonSchema),
   register(api) {
     const pluginConfig = parsePluginConfig(api.pluginConfig);
+    const inboundOwnerContexts = new Map<string, { conversationId?: string; senderId?: string }>();
     const stateDir = path.join(api.runtime.state.resolveStateDir(), PLUGIN_ID);
     const repository = new SQLiteCalendarRepository(
       resolveDatabasePath({
@@ -351,6 +353,17 @@ export default definePluginEntry({
       };
     });
 
+    api.on("message_received", (event, ctx) => {
+      if (!ctx.sessionKey) {
+        return;
+      }
+
+      inboundOwnerContexts.set(ctx.sessionKey, {
+        conversationId: ctx.conversationId,
+        senderId: ctx.senderId ?? event.senderId,
+      });
+    });
+
     api.registerTool(
       (toolContext) =>
         createCalendarTools({
@@ -360,6 +373,10 @@ export default definePluginEntry({
           defaultAgendaLimit: pluginConfig.defaultAgendaLimit,
           timezone: pluginConfig.defaultTimezone,
           detectionMode: pluginConfig.detectionMode,
+          inboundContext:
+            toolContext.sessionKey != null
+              ? inboundOwnerContexts.get(toolContext.sessionKey)
+              : undefined,
         }),
       { names: [...TOOL_NAMES] },
     );
