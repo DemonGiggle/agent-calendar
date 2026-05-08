@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { formatAgendaText } from "../dist/core/format.js";
+import { formatAgendaText, formatOccurrenceLine } from "../dist/core/format.js";
 
 test("formatAgendaText produces compact mobile-friendly output", () => {
   const text = formatAgendaText({
@@ -28,3 +28,30 @@ test("formatAgendaText produces compact mobile-friendly output", () => {
   assert.match(text, /note: Bring updated timeline/);
 });
 
+test("formatAgendaText returns an empty-state message", () => {
+  const text = formatAgendaText({
+    title: "Agenda for 2026-05-10",
+    timeZone: "UTC",
+    occurrences: [],
+  });
+
+  assert.equal(text, "Agenda for 2026-05-10\nNo events found.");
+});
+
+test("formatOccurrenceLine renders all-day entries without a time label", () => {
+  const line = formatOccurrenceLine(
+    {
+      occurrenceId: "entry-2:2026-05-10",
+      entryId: "entry-2",
+      kind: "event",
+      title: "Company retreat",
+      localDate: "2026-05-10",
+      allDay: true,
+      source: "manual",
+    },
+    "UTC",
+  );
+
+  assert.match(line, /^• .* — Company retreat$/);
+  assert.doesNotMatch(line, /·/);
+});

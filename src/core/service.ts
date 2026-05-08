@@ -6,6 +6,7 @@ import {
   compareDateKeys,
   isValidDateKey,
   isValidTimeKey,
+  parseDateKey,
   utcMsToDateKey,
   utcMsToTimeKey,
   zonedDateTimeToUtcMs,
@@ -94,6 +95,62 @@ function toOccurrence(entry: CalendarEntry, localDate: string, timeZone: string)
   };
 }
 
+function diffDays(startDate: string, endDate: string): number {
+  const [startYear, startMonth, startDay] = parseDateKey(startDate);
+  const [endYear, endMonth, endDay] = parseDateKey(endDate);
+  const startUtc = Date.UTC(startYear, startMonth - 1, startDay, 12, 0, 0);
+  const endUtc = Date.UTC(endYear, endMonth - 1, endDay, 12, 0, 0);
+  return Math.floor((endUtc - startUtc) / 86_400_000);
+}
+
+function diffMonths(startDate: string, endDate: string): number {
+  const [startYear, startMonth] = parseDateKey(startDate);
+  const [endYear, endMonth] = parseDateKey(endDate);
+  return (endYear - startYear) * 12 + (endMonth - startMonth);
+}
+
+function advanceRecurrenceDate(currentDate: string, recurrence: NonNullable<CalendarEntry["recurrence"]>): string {
+  return recurrence.frequency === "daily"
+    ? addDays(currentDate, recurrence.interval)
+    : recurrence.frequency === "weekly"
+      ? addDays(currentDate, recurrence.interval * 7)
+      : addMonths(currentDate, recurrence.interval);
+}
+
+function fastForwardRecurrenceDate(params: {
+  currentDate: string;
+  recurrence: NonNullable<CalendarEntry["recurrence"]>;
+  dateFrom: string;
+}): string {
+  if (compareDateKeys(params.currentDate, params.dateFrom) >= 0) {
+    return params.currentDate;
+  }
+
+  let currentDate = params.currentDate;
+  if (params.recurrence.frequency === "daily") {
+    const steps = Math.floor(diffDays(currentDate, params.dateFrom) / params.recurrence.interval);
+    if (steps > 0) {
+      currentDate = addDays(currentDate, steps * params.recurrence.interval);
+    }
+  } else if (params.recurrence.frequency === "weekly") {
+    const steps = Math.floor(diffDays(currentDate, params.dateFrom) / (params.recurrence.interval * 7));
+    if (steps > 0) {
+      currentDate = addDays(currentDate, steps * params.recurrence.interval * 7);
+    }
+  } else {
+    const steps = Math.floor(diffMonths(currentDate, params.dateFrom) / params.recurrence.interval);
+    if (steps > 0) {
+      currentDate = addMonths(currentDate, steps * params.recurrence.interval);
+    }
+  }
+
+  while (currentDate !== "" && compareDateKeys(currentDate, params.dateFrom) < 0) {
+    currentDate = advanceRecurrenceDate(currentDate, params.recurrence);
+  }
+
+  return currentDate;
+}
+
 function expandOccurrences(params: {
   entries: CalendarEntry[];
   timeZone: string;
@@ -114,7 +171,17 @@ function expandOccurrences(params: {
       continue;
     }
 
-    let currentDate = entry.localDate;
+    let currentDate = fastForwardRecurrenceDate({
+      currentDate: entry.localDate,
+      recurrence: entry.recurrence,
+      dateFrom: params.dateFrom,
+    });
+    if (
+      currentDate === "" ||
+      (entry.recurrence.untilDate && compareDateKeys(currentDate, entry.recurrence.untilDate) > 0)
+    ) {
+      continue;
+    }
     let emitted = 0;
     while (currentDate !== "" && emitted < MAX_EXPANDED_OCCURRENCES) {
       if (
@@ -127,12 +194,7 @@ function expandOccurrences(params: {
       if (entry.recurrence.untilDate && compareDateKeys(currentDate, entry.recurrence.untilDate) >= 0) {
         break;
       }
-      currentDate =
-        entry.recurrence.frequency === "daily"
-          ? addDays(currentDate, entry.recurrence.interval)
-          : entry.recurrence.frequency === "weekly"
-            ? addDays(currentDate, entry.recurrence.interval * 7)
-            : addMonths(currentDate, entry.recurrence.interval);
+      currentDate = advanceRecurrenceDate(currentDate, entry.recurrence);
       if (currentDate !== "" && compareDateKeys(currentDate, params.dateTo) > 0) {
         break;
       }
@@ -300,8 +362,9 @@ export class CalendarService {
       timeZone: this.timeZone,
       dateFrom,
       dateTo,
-      limit: limit ?? this.defaultAgendaLimit,
-    }).filter((occurrence) => occurrence.allDay || occurrence.startUtcMs == null || occurrence.startUtcMs >= now);
+    })
+      .filter((occurrence) => occurrence.allDay || occurrence.startUtcMs == null || occurrence.startUtcMs >= now)
+      .slice(0, limit ?? this.defaultAgendaLimit);
     return {
       occurrences,
       text: formatAgendaText({
