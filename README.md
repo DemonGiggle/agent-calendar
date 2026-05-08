@@ -49,6 +49,7 @@ Current policy:
 | `dbPath` | Optional SQLite file path | plugin state dir |
 | `defaultTimezone` | IANA timezone for parsing/formatting | current system timezone |
 | `defaultAgendaLimit` | Default count for upcoming agenda | `5` |
+| `defaultEventReminderMinutesBefore` | Default reminder lead time for timed events | `10` |
 | `detectionMode` | Inferred-capture policy | `confirm_first` |
 
 ## Development
@@ -62,5 +63,6 @@ npm test
 ## Notes
 
 - Reminders are written through OpenClaw's exported cron-store runtime.
+- Timed events created through OpenClaw default to a reminder 10 minutes before start unless the caller overrides or clears it.
 - Storage uses Node's built-in `node:sqlite`, so Node 22+ is required.
 - Agenda output is intentionally compact for Telegram-like chat surfaces.

@@ -24,6 +24,10 @@ import {
   looksCalendarRelevant,
   resolveOwnerScope,
 } from "./openclaw/context.js";
+import {
+  resolveCreateReminderMinutesBefore,
+  resolveUpdateReminderMinutesBefore,
+} from "./openclaw/reminder-defaults.js";
 import { upsertReminder } from "./openclaw/reminders.js";
 import { buildToolFailurePayload } from "./openclaw/tool-errors.js";
 
@@ -70,6 +74,7 @@ function createCalendarTools(params: {
   service: CalendarService;
   api: Parameters<Parameters<typeof definePluginEntry>[0]["register"]>[0];
   defaultAgendaLimit: number;
+  defaultEventReminderMinutesBefore: number;
   timezone: string;
   detectionMode: "confirm_first" | "auto_save_high_confidence";
   inboundContext?: {
@@ -152,7 +157,7 @@ function createCalendarTools(params: {
       name: "cal_entry_create",
       label: "Create calendar entry",
       description:
-        "Create a calendar event or dated memo in the requester's scoped calendar. Use this after the date and title are clear.",
+        `Create a calendar event or dated memo in the requester's scoped calendar. Timed events default to a reminder ${params.defaultEventReminderMinutesBefore} minutes before start unless the tool call overrides it.`,
       parameters: Type.Object({
         kind: Type.Union([Type.Literal("event"), Type.Literal("memo")]),
         title: Type.String({ minLength: 1 }),
@@ -179,19 +184,29 @@ function createCalendarTools(params: {
       async execute(_toolCallId, rawParams) {
         try {
           const paramsRecord = rawParams as Record<string, unknown>;
+          const time = readStringParam(paramsRecord, "time");
+          const reminderAt = readStringParam(paramsRecord, "reminderAt");
+          const reminderMinutesBefore = readNumberParam(paramsRecord, "reminderMinutesBefore", {
+            integer: true,
+          });
           const entry = params.service.createEntry({
             ownerKey: scope.ownerKey,
             kind: readStringParam(paramsRecord, "kind", { required: true }) as "event" | "memo",
             title: readStringParam(paramsRecord, "title", { required: true }),
             memo: readStringParam(paramsRecord, "memo"),
             date: readStringParam(paramsRecord, "date", { required: true }),
-            time: readStringParam(paramsRecord, "time"),
+            time,
             endTime: readStringParam(paramsRecord, "endTime"),
             allDay: paramsRecord.allDay === true,
             recurrence: parseRecurrence(paramsRecord.recurrence),
-            reminderAt: readStringParam(paramsRecord, "reminderAt"),
-            reminderMinutesBefore: readNumberParam(paramsRecord, "reminderMinutesBefore", {
-              integer: true,
+            reminderAt,
+            reminderMinutesBefore: resolveCreateReminderMinutesBefore({
+              kind: readStringParam(paramsRecord, "kind", { required: true }) as "event" | "memo",
+              time,
+              allDay: paramsRecord.allDay === true,
+              reminderAt,
+              reminderMinutesBefore,
+              defaultEventReminderMinutesBefore: params.defaultEventReminderMinutesBefore,
             }),
             source:
               readStringParam(paramsRecord, "source") === "detected" ? "detected" : "manual",
@@ -206,7 +221,7 @@ function createCalendarTools(params: {
       name: "cal_entry_update",
       label: "Update calendar entry",
       description:
-        "Update an existing calendar entry in the requester's scoped calendar, including reminder details or recurrence.",
+        `Update an existing calendar entry in the requester's scoped calendar, including reminder details or recurrence. Timed events keep or receive the default ${params.defaultEventReminderMinutesBefore}-minute reminder unless the tool call clears or overrides it.`,
       parameters: Type.Object({
         entryId: Type.String({ minLength: 1 }),
         title: Type.Optional(Type.String()),
@@ -236,27 +251,42 @@ function createCalendarTools(params: {
       async execute(_toolCallId, rawParams) {
         try {
           const paramsRecord = rawParams as Record<string, unknown>;
+          const entryId = readStringParam(paramsRecord, "entryId", { required: true });
+          const existing = params.service.getEntry(scope.ownerKey, entryId);
+          const time = readStringParam(paramsRecord, "time");
+          const reminderAt =
+            paramsRecord.reminderAt === null
+              ? null
+              : readStringParam(paramsRecord, "reminderAt");
+          const reminderMinutesBefore =
+            paramsRecord.reminderMinutesBefore === null
+              ? null
+              : readNumberParam(paramsRecord, "reminderMinutesBefore", { integer: true });
           const updated = params.service.updateEntry({
             ownerKey: scope.ownerKey,
-            entryId: readStringParam(paramsRecord, "entryId", { required: true }),
+            entryId,
             title: readStringParam(paramsRecord, "title"),
             memo: readStringParam(paramsRecord, "memo"),
             date: readStringParam(paramsRecord, "date"),
-            time: readStringParam(paramsRecord, "time"),
+            time,
             endTime: readStringParam(paramsRecord, "endTime"),
             allDay: typeof paramsRecord.allDay === "boolean" ? paramsRecord.allDay : undefined,
             recurrence:
               paramsRecord.recurrence === null
                 ? null
                 : parseRecurrence(paramsRecord.recurrence),
-            reminderAt:
-              paramsRecord.reminderAt === null
-                ? null
-                : readStringParam(paramsRecord, "reminderAt"),
-            reminderMinutesBefore:
-              paramsRecord.reminderMinutesBefore === null
-                ? null
-                : readNumberParam(paramsRecord, "reminderMinutesBefore", { integer: true }),
+            reminderAt,
+            reminderMinutesBefore: existing
+              ? resolveUpdateReminderMinutesBefore({
+                  existing,
+                  time,
+                  allDay: typeof paramsRecord.allDay === "boolean" ? paramsRecord.allDay : undefined,
+                  reminderAt,
+                  reminderMinutesBefore,
+                  clearReminder: paramsRecord.clearReminder === true,
+                  defaultEventReminderMinutesBefore: params.defaultEventReminderMinutesBefore,
+                })
+              : reminderMinutesBefore,
             clearReminder: paramsRecord.clearReminder === true,
           });
           return createToolResult("cal_entry_update", updated);
@@ -470,6 +500,7 @@ export default definePluginEntry({
           service,
           api,
           defaultAgendaLimit: pluginConfig.defaultAgendaLimit,
+          defaultEventReminderMinutesBefore: pluginConfig.defaultEventReminderMinutesBefore,
           timezone: pluginConfig.defaultTimezone,
           detectionMode: pluginConfig.detectionMode,
           inboundContext:

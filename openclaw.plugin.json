@@ -34,6 +34,13 @@
         "maximum": 20,
         "default": 5
       },
+      "defaultEventReminderMinutesBefore": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 1440,
+        "default": 10,
+        "description": "Default reminder lead time for timed events when the tool caller does not specify a reminder."
+      },
       "detectionMode": {
         "type": "string",
         "enum": ["confirm_first", "auto_save_high_confidence"],

@@ -6,6 +6,7 @@ export interface CalendarPluginConfig {
   dbPath?: string;
   defaultTimezone: string;
   defaultAgendaLimit: number;
+  defaultEventReminderMinutesBefore: number;
   detectionMode: DetectionMode;
 }
 
@@ -31,6 +32,13 @@ export const calendarPluginConfigJsonSchema = {
       minimum: 1,
       maximum: 20,
       default: 5,
+    },
+    defaultEventReminderMinutesBefore: {
+      type: "integer",
+      minimum: 0,
+      maximum: 1440,
+      default: 10,
+      description: "Default reminder lead time for timed events when the tool caller does not specify a reminder.",
     },
     detectionMode: {
       type: "string",
@@ -64,6 +72,13 @@ export function parsePluginConfig(raw: unknown): CalendarPluginConfig {
     input.defaultAgendaLimit <= 20
       ? input.defaultAgendaLimit
       : 5;
+  const defaultEventReminderMinutesBefore =
+    typeof input.defaultEventReminderMinutesBefore === "number" &&
+    Number.isInteger(input.defaultEventReminderMinutesBefore) &&
+    input.defaultEventReminderMinutesBefore >= 0 &&
+    input.defaultEventReminderMinutesBefore <= 1440
+      ? input.defaultEventReminderMinutesBefore
+      : 10;
   const detectionMode =
     input.detectionMode === "auto_save_high_confidence"
       ? "auto_save_high_confidence"
@@ -76,6 +91,7 @@ export function parsePluginConfig(raw: unknown): CalendarPluginConfig {
         : undefined,
     defaultTimezone,
     defaultAgendaLimit,
+    defaultEventReminderMinutesBefore,
     detectionMode,
   };
 }
