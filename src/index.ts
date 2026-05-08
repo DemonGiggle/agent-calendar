@@ -19,6 +19,7 @@ import { SQLiteCalendarRepository } from "./core/repository.js";
 import { CalendarService } from "./core/service.js";
 import type { CalendarEntry, RecurrenceSpec } from "./core/types.js";
 import {
+  buildOwnerResolutionDebug,
   buildCalendarPromptGuidance,
   looksCalendarRelevant,
   resolveOwnerScope,
@@ -71,9 +72,21 @@ function createCalendarTools(params: {
   defaultAgendaLimit: number;
   timezone: string;
   detectionMode: "confirm_first" | "auto_save_high_confidence";
-  inboundContext?: { conversationId?: string; senderId?: string };
+  inboundContext?: {
+    conversationId?: string;
+    senderId?: string;
+    deliveryTarget?: string;
+    originatingTarget?: string;
+  };
 }): AnyAgentTool[] {
   const scope = resolveOwnerScope(params.toolContext, params.inboundContext);
+  params.api.logger.info(
+    `agent-calendar: resolved owner scope ${buildOwnerResolutionDebug({
+      ownerKey: scope.ownerKey,
+      toolContext: params.toolContext,
+      inboundContext: params.inboundContext,
+    })}`,
+  );
 
   const failTool = (tool: string, step: string, error: unknown) => {
     const payload = buildToolFailurePayload({
@@ -387,7 +400,15 @@ export default definePluginEntry({
   configSchema: buildJsonPluginConfigSchema(calendarPluginConfigJsonSchema),
   register(api) {
     const pluginConfig = parsePluginConfig(api.pluginConfig);
-    const inboundOwnerContexts = new Map<string, { conversationId?: string; senderId?: string }>();
+    const inboundOwnerContexts = new Map<
+      string,
+      {
+        conversationId?: string;
+        senderId?: string;
+        deliveryTarget?: string;
+        originatingTarget?: string;
+      }
+    >();
     const stateDir = path.join(api.runtime.state.resolveStateDir(), PLUGIN_ID);
     const repository = new SQLiteCalendarRepository(
       resolveDatabasePath({
@@ -420,10 +441,26 @@ export default definePluginEntry({
         return;
       }
 
+      const metadata = event.metadata as Record<string, unknown> | undefined;
+      const deliveryTarget =
+        typeof metadata?.to === "string" && metadata.to.trim().length > 0
+          ? metadata.to
+          : undefined;
+      const originatingTarget =
+        typeof metadata?.originatingTo === "string" && metadata.originatingTo.trim().length > 0
+          ? metadata.originatingTo
+          : undefined;
+
       inboundOwnerContexts.set(ctx.sessionKey, {
         conversationId: ctx.conversationId,
         senderId: ctx.senderId ?? event.senderId,
+        deliveryTarget,
+        originatingTarget,
       });
+
+      api.logger.debug?.(
+        `agent-calendar: captured inbound owner context sessionKey=${ctx.sessionKey} conversationId=${ctx.conversationId ?? "none"} senderId=${ctx.senderId ?? event.senderId ?? "none"} originatingTo=${originatingTarget ?? "none"} to=${deliveryTarget ?? "none"}`,
+      );
     });
 
     api.registerTool(

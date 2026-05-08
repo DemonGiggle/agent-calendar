@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { resolveOwnerScope } from "../dist/openclaw/context.js";
+import { buildOwnerResolutionDebug, resolveOwnerScope } from "../dist/openclaw/context.js";
 
 test("resolveOwnerScope prefers group target ids when present", () => {
   const result = resolveOwnerScope({
@@ -12,8 +12,9 @@ test("resolveOwnerScope prefers group target ids when present", () => {
       to: "-100123456",
     },
   }, {
-    conversationId: "-100123456",
+    conversationId: "telegram:-100123456",
     senderId: "alice",
+    originatingTarget: "telegram:-100123456",
   });
 
   assert.equal(result.ownerKey, "target:telegram:default:-100123456");
@@ -28,8 +29,9 @@ test("resolveOwnerScope falls back to sender id when conversation id matches sen
       to: "alice",
     },
   }, {
-    conversationId: "alice",
+    conversationId: "telegram:alice",
     senderId: "alice",
+    originatingTarget: "telegram:alice",
   });
 
   assert.equal(result.ownerKey, "sender:telegram:default:alice");
@@ -46,4 +48,27 @@ test("resolveOwnerScope still uses sender id when user-prefixed targets normaliz
   });
 
   assert.equal(result.ownerKey, "sender:telegram:default:alice");
+});
+
+test("buildOwnerResolutionDebug includes the normalized decision inputs", () => {
+  const debug = buildOwnerResolutionDebug({
+    ownerKey: "target:telegram:default:-100123456",
+    toolContext: {
+      messageChannel: "telegram",
+      requesterSenderId: "alice",
+      sessionKey: "session-1",
+      deliveryContext: {
+        channel: "telegram",
+        to: "telegram:-100123456",
+      },
+    },
+    inboundContext: {
+      conversationId: "telegram:-100123456",
+      senderId: "alice",
+      originatingTarget: "telegram:-100123456",
+    },
+  });
+
+  assert.match(debug, /ownerKey=target:telegram:default:-100123456/);
+  assert.match(debug, /originatingTarget=telegram:-100123456/);
 });
