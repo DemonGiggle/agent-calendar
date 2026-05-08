@@ -1,3 +1,4 @@
+import { stripTargetKindPrefix } from "openclaw/plugin-sdk/core";
 import type { OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry";
 
 export interface OwnerScope {
@@ -10,19 +11,71 @@ export interface OwnerScope {
   };
 }
 
-export function resolveOwnerScope(ctx: OpenClawPluginToolContext): OwnerScope {
+export interface InboundOwnerContext {
+  conversationId?: string;
+  senderId?: string;
+}
+
+function readNonBlankString(value: string | undefined): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function normalizeOwnerIdentifier(value: string | undefined): string | undefined {
+  const normalized = readNonBlankString(value);
+  return normalized ? stripTargetKindPrefix(normalized) : undefined;
+}
+
+function preferGroupOwnerKey(params: {
+  channel: string;
+  accountId?: string;
+  senderId?: string;
+  conversationId?: string;
+  target?: string;
+}): string | undefined {
+  const accountKey = params.accountId ?? "default";
+  const senderId = normalizeOwnerIdentifier(params.senderId);
+  const conversationId = normalizeOwnerIdentifier(params.conversationId);
+  const fallbackTarget = normalizeOwnerIdentifier(params.target);
+
+  if (conversationId && senderId && conversationId !== senderId) {
+    return `target:${params.channel}:${accountKey}:${conversationId}`;
+  }
+
+  if (senderId) {
+    return `sender:${params.channel}:${accountKey}:${senderId}`;
+  }
+
+  if (conversationId) {
+    return `target:${params.channel}:${accountKey}:${conversationId}`;
+  }
+
+  if (fallbackTarget) {
+    return `target:${params.channel}:${accountKey}:${fallbackTarget}`;
+  }
+
+  return undefined;
+}
+
+export function resolveOwnerScope(
+  ctx: OpenClawPluginToolContext,
+  inboundContext?: InboundOwnerContext,
+): OwnerScope {
   const channel = ctx.deliveryContext?.channel ?? ctx.messageChannel ?? "unknown";
   const accountId = ctx.deliveryContext?.accountId;
-  const senderId = ctx.requesterSenderId;
+  const senderId = ctx.requesterSenderId ?? inboundContext?.senderId;
   const target = ctx.deliveryContext?.to;
 
-  const ownerKey = senderId
-    ? `sender:${channel}:${accountId ?? "default"}:${senderId}`
-    : target
-      ? `target:${channel}:${accountId ?? "default"}:${target}`
-      : ctx.sessionKey
-        ? `session:${ctx.sessionKey}`
-        : `agent:${ctx.agentId ?? "default"}`;
+  const ownerKey =
+    preferGroupOwnerKey({
+      channel,
+      accountId,
+      senderId,
+      conversationId: inboundContext?.conversationId,
+      target,
+    }) ??
+    (ctx.sessionKey
+      ? `session:${ctx.sessionKey}`
+      : `agent:${ctx.agentId ?? "default"}`);
 
   return {
     ownerKey,
@@ -56,4 +109,3 @@ export function looksCalendarRelevant(prompt: string): boolean {
     prompt,
   );
 }
-

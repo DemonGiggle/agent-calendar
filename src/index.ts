@@ -24,6 +24,7 @@ import {
   resolveOwnerScope,
 } from "./openclaw/context.js";
 import { upsertReminder } from "./openclaw/reminders.js";
+import { buildToolFailurePayload } from "./openclaw/tool-errors.js";
 
 const PLUGIN_ID = "agent-calendar";
 const TOOL_NAMES = [
@@ -70,17 +71,39 @@ function createCalendarTools(params: {
   defaultAgendaLimit: number;
   timezone: string;
   detectionMode: "confirm_first" | "auto_save_high_confidence";
+  inboundContext?: { conversationId?: string; senderId?: string };
 }): AnyAgentTool[] {
-  const scope = resolveOwnerScope(params.toolContext);
+  const scope = resolveOwnerScope(params.toolContext, params.inboundContext);
 
-  const createToolResult = async (entry: CalendarEntry) => {
-    const nextEntry = await upsertReminder({
-      api: params.api,
-      entry,
-      toolContext: params.toolContext,
-      timezone: params.timezone,
+  const failTool = (tool: string, step: string, error: unknown) => {
+    const payload = buildToolFailurePayload({
+      tool,
+      step,
+      error,
     });
-    params.service.saveEntry(nextEntry);
+    params.api.logger.error(`${payload.summary} [owner=${scope.ownerKey}]`);
+    return jsonResult(payload);
+  };
+
+  const createToolResult = async (tool: string, entry: CalendarEntry) => {
+    let nextEntry: CalendarEntry;
+    try {
+      nextEntry = await upsertReminder({
+        api: params.api,
+        entry,
+        toolContext: params.toolContext,
+        timezone: params.timezone,
+      });
+    } catch (error) {
+      return failTool(tool, "schedule-reminder", error);
+    }
+
+    try {
+      params.service.saveEntry(nextEntry);
+    } catch (error) {
+      return failTool(tool, "persist-entry", error);
+    }
+
     return jsonResult({
       status: "ok",
       summary: `Saved ${nextEntry.kind} "${nextEntry.title}".`,
@@ -98,14 +121,18 @@ function createCalendarTools(params: {
         text: Type.String({ minLength: 1 }),
       }),
       async execute(_toolCallId, rawParams) {
-        const text = readStringParam(rawParams as Record<string, unknown>, "text", { required: true });
-        return jsonResult({
-          status: "ok",
-          candidate: params.service.detectCandidate(text),
-          detectionMode: params.detectionMode,
-          summary:
-            "Use this result to confirm the calendar details before creating or updating an entry.",
-        });
+        try {
+          const text = readStringParam(rawParams as Record<string, unknown>, "text", { required: true });
+          return jsonResult({
+            status: "ok",
+            candidate: params.service.detectCandidate(text),
+            detectionMode: params.detectionMode,
+            summary:
+              "Use this result to confirm the calendar details before creating or updating an entry.",
+          });
+        } catch (error) {
+          return failTool("cal_candidate_detect", "detect-candidate", error);
+        }
       },
     },
     {
@@ -137,25 +164,29 @@ function createCalendarTools(params: {
         source: Type.Optional(Type.Union([Type.Literal("manual"), Type.Literal("detected")])),
       }),
       async execute(_toolCallId, rawParams) {
-        const paramsRecord = rawParams as Record<string, unknown>;
-        const entry = params.service.createEntry({
-          ownerKey: scope.ownerKey,
-          kind: readStringParam(paramsRecord, "kind", { required: true }) as "event" | "memo",
-          title: readStringParam(paramsRecord, "title", { required: true }),
-          memo: readStringParam(paramsRecord, "memo"),
-          date: readStringParam(paramsRecord, "date", { required: true }),
-          time: readStringParam(paramsRecord, "time"),
-          endTime: readStringParam(paramsRecord, "endTime"),
-          allDay: paramsRecord.allDay === true,
-          recurrence: parseRecurrence(paramsRecord.recurrence),
-          reminderAt: readStringParam(paramsRecord, "reminderAt"),
-          reminderMinutesBefore: readNumberParam(paramsRecord, "reminderMinutesBefore", {
-            integer: true,
-          }),
-          source:
-            readStringParam(paramsRecord, "source") === "detected" ? "detected" : "manual",
-        });
-        return createToolResult(entry);
+        try {
+          const paramsRecord = rawParams as Record<string, unknown>;
+          const entry = params.service.createEntry({
+            ownerKey: scope.ownerKey,
+            kind: readStringParam(paramsRecord, "kind", { required: true }) as "event" | "memo",
+            title: readStringParam(paramsRecord, "title", { required: true }),
+            memo: readStringParam(paramsRecord, "memo"),
+            date: readStringParam(paramsRecord, "date", { required: true }),
+            time: readStringParam(paramsRecord, "time"),
+            endTime: readStringParam(paramsRecord, "endTime"),
+            allDay: paramsRecord.allDay === true,
+            recurrence: parseRecurrence(paramsRecord.recurrence),
+            reminderAt: readStringParam(paramsRecord, "reminderAt"),
+            reminderMinutesBefore: readNumberParam(paramsRecord, "reminderMinutesBefore", {
+              integer: true,
+            }),
+            source:
+              readStringParam(paramsRecord, "source") === "detected" ? "detected" : "manual",
+          });
+          return createToolResult("cal_entry_create", entry);
+        } catch (error) {
+          return failTool("cal_entry_create", "create-entry", error);
+        }
       },
     },
     {
@@ -190,31 +221,35 @@ function createCalendarTools(params: {
         clearReminder: Type.Optional(Type.Boolean()),
       }),
       async execute(_toolCallId, rawParams) {
-        const paramsRecord = rawParams as Record<string, unknown>;
-        const updated = params.service.updateEntry({
-          ownerKey: scope.ownerKey,
-          entryId: readStringParam(paramsRecord, "entryId", { required: true }),
-          title: readStringParam(paramsRecord, "title"),
-          memo: readStringParam(paramsRecord, "memo"),
-          date: readStringParam(paramsRecord, "date"),
-          time: readStringParam(paramsRecord, "time"),
-          endTime: readStringParam(paramsRecord, "endTime"),
-          allDay: typeof paramsRecord.allDay === "boolean" ? paramsRecord.allDay : undefined,
-          recurrence:
-            paramsRecord.recurrence === null
-              ? null
-              : parseRecurrence(paramsRecord.recurrence),
-          reminderAt:
-            paramsRecord.reminderAt === null
-              ? null
-              : readStringParam(paramsRecord, "reminderAt"),
-          reminderMinutesBefore:
-            paramsRecord.reminderMinutesBefore === null
-              ? null
-              : readNumberParam(paramsRecord, "reminderMinutesBefore", { integer: true }),
-          clearReminder: paramsRecord.clearReminder === true,
-        });
-        return createToolResult(updated);
+        try {
+          const paramsRecord = rawParams as Record<string, unknown>;
+          const updated = params.service.updateEntry({
+            ownerKey: scope.ownerKey,
+            entryId: readStringParam(paramsRecord, "entryId", { required: true }),
+            title: readStringParam(paramsRecord, "title"),
+            memo: readStringParam(paramsRecord, "memo"),
+            date: readStringParam(paramsRecord, "date"),
+            time: readStringParam(paramsRecord, "time"),
+            endTime: readStringParam(paramsRecord, "endTime"),
+            allDay: typeof paramsRecord.allDay === "boolean" ? paramsRecord.allDay : undefined,
+            recurrence:
+              paramsRecord.recurrence === null
+                ? null
+                : parseRecurrence(paramsRecord.recurrence),
+            reminderAt:
+              paramsRecord.reminderAt === null
+                ? null
+                : readStringParam(paramsRecord, "reminderAt"),
+            reminderMinutesBefore:
+              paramsRecord.reminderMinutesBefore === null
+                ? null
+                : readNumberParam(paramsRecord, "reminderMinutesBefore", { integer: true }),
+            clearReminder: paramsRecord.clearReminder === true,
+          });
+          return createToolResult("cal_entry_update", updated);
+        } catch (error) {
+          return failTool("cal_entry_update", "update-entry", error);
+        }
       },
     },
     {
@@ -226,22 +261,38 @@ function createCalendarTools(params: {
         entryId: Type.String({ minLength: 1 }),
       }),
       async execute(_toolCallId, rawParams) {
-        const entryId = readStringParam(rawParams as Record<string, unknown>, "entryId", {
-          required: true,
-        });
-        const deleted = params.service.deleteEntry(scope.ownerKey, entryId);
-        const cleared = await upsertReminder({
-          api: params.api,
-          entry: { ...deleted, reminderAtUtcMs: undefined },
-          toolContext: params.toolContext,
-          timezone: params.timezone,
-        });
-        params.service.saveEntry(cleared);
-        return jsonResult({
-          status: "ok",
-          summary: `Cancelled "${deleted.title}".`,
-          entry: cleared,
-        });
+        try {
+          const entryId = readStringParam(rawParams as Record<string, unknown>, "entryId", {
+            required: true,
+          });
+          const deleted = params.service.deleteEntry(scope.ownerKey, entryId);
+
+          let cleared: CalendarEntry;
+          try {
+            cleared = await upsertReminder({
+              api: params.api,
+              entry: { ...deleted, reminderAtUtcMs: undefined },
+              toolContext: params.toolContext,
+              timezone: params.timezone,
+            });
+          } catch (error) {
+            return failTool("cal_entry_delete", "clear-reminder", error);
+          }
+
+          try {
+            params.service.saveEntry(cleared);
+          } catch (error) {
+            return failTool("cal_entry_delete", "persist-entry", error);
+          }
+
+          return jsonResult({
+            status: "ok",
+            summary: `Cancelled "${deleted.title}".`,
+            entry: cleared,
+          });
+        } catch (error) {
+          return failTool("cal_entry_delete", "delete-entry", error);
+        }
       },
     },
     {
@@ -253,16 +304,20 @@ function createCalendarTools(params: {
         limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
       }),
       async execute(_toolCallId, rawParams) {
-        const limit =
-          readNumberParam(rawParams as Record<string, unknown>, "limit", { integer: true }) ??
-          params.defaultAgendaLimit;
-        const result = params.service.listUpcoming(scope.ownerKey, limit);
-        return jsonResult({
-          status: "ok",
-          summary: result.text,
-          text: result.text,
-          occurrences: result.occurrences,
-        });
+        try {
+          const limit =
+            readNumberParam(rawParams as Record<string, unknown>, "limit", { integer: true }) ??
+            params.defaultAgendaLimit;
+          const result = params.service.listUpcoming(scope.ownerKey, limit);
+          return jsonResult({
+            status: "ok",
+            summary: result.text,
+            text: result.text,
+            occurrences: result.occurrences,
+          });
+        } catch (error) {
+          return failTool("cal_agenda_upcoming", "list-upcoming", error);
+        }
       },
     },
     {
@@ -274,14 +329,18 @@ function createCalendarTools(params: {
         date: Type.String({ minLength: 1 }),
       }),
       async execute(_toolCallId, rawParams) {
-        const date = readStringParam(rawParams as Record<string, unknown>, "date", { required: true });
-        const result = params.service.listAgendaForDate(scope.ownerKey, date);
-        return jsonResult({
-          status: "ok",
-          summary: result.text,
-          text: result.text,
-          occurrences: result.occurrences,
-        });
+        try {
+          const date = readStringParam(rawParams as Record<string, unknown>, "date", { required: true });
+          const result = params.service.listAgendaForDate(scope.ownerKey, date);
+          return jsonResult({
+            status: "ok",
+            summary: result.text,
+            text: result.text,
+            occurrences: result.occurrences,
+          });
+        } catch (error) {
+          return failTool("cal_agenda_day", "list-day", error);
+        }
       },
     },
     {
@@ -296,21 +355,25 @@ function createCalendarTools(params: {
         limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
       }),
       async execute(_toolCallId, rawParams) {
-        const paramsRecord = rawParams as Record<string, unknown>;
-        const limit = readNumberParam(paramsRecord, "limit", { integer: true }) ?? 10;
-        const result = params.service.searchEntries({
-          ownerKey: scope.ownerKey,
-          query: readStringParam(paramsRecord, "query"),
-          dateFrom: readStringParam(paramsRecord, "dateFrom"),
-          dateTo: readStringParam(paramsRecord, "dateTo"),
-          limit,
-        });
-        return jsonResult({
-          status: "ok",
-          summary: result.text,
-          text: result.text,
-          entries: result.entries,
-        });
+        try {
+          const paramsRecord = rawParams as Record<string, unknown>;
+          const limit = readNumberParam(paramsRecord, "limit", { integer: true }) ?? 10;
+          const result = params.service.searchEntries({
+            ownerKey: scope.ownerKey,
+            query: readStringParam(paramsRecord, "query"),
+            dateFrom: readStringParam(paramsRecord, "dateFrom"),
+            dateTo: readStringParam(paramsRecord, "dateTo"),
+            limit,
+          });
+          return jsonResult({
+            status: "ok",
+            summary: result.text,
+            text: result.text,
+            entries: result.entries,
+          });
+        } catch (error) {
+          return failTool("cal_entry_search", "search-entries", error);
+        }
       },
     },
   ];
@@ -324,6 +387,7 @@ export default definePluginEntry({
   configSchema: buildJsonPluginConfigSchema(calendarPluginConfigJsonSchema),
   register(api) {
     const pluginConfig = parsePluginConfig(api.pluginConfig);
+    const inboundOwnerContexts = new Map<string, { conversationId?: string; senderId?: string }>();
     const stateDir = path.join(api.runtime.state.resolveStateDir(), PLUGIN_ID);
     const repository = new SQLiteCalendarRepository(
       resolveDatabasePath({
@@ -351,6 +415,17 @@ export default definePluginEntry({
       };
     });
 
+    api.on("message_received", (event, ctx) => {
+      if (!ctx.sessionKey) {
+        return;
+      }
+
+      inboundOwnerContexts.set(ctx.sessionKey, {
+        conversationId: ctx.conversationId,
+        senderId: ctx.senderId ?? event.senderId,
+      });
+    });
+
     api.registerTool(
       (toolContext) =>
         createCalendarTools({
@@ -360,6 +435,10 @@ export default definePluginEntry({
           defaultAgendaLimit: pluginConfig.defaultAgendaLimit,
           timezone: pluginConfig.defaultTimezone,
           detectionMode: pluginConfig.detectionMode,
+          inboundContext:
+            toolContext.sessionKey != null
+              ? inboundOwnerContexts.get(toolContext.sessionKey)
+              : undefined,
         }),
       { names: [...TOOL_NAMES] },
     );
