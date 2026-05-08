@@ -47,7 +47,7 @@ Current policy:
 | Key | Meaning | Default |
 | --- | --- | --- |
 | `dbPath` | Optional SQLite file path | plugin state dir |
-| `defaultTimezone` | IANA timezone for parsing/formatting | `UTC` |
+| `defaultTimezone` | IANA timezone for parsing/formatting | current system timezone |
 | `defaultAgendaLimit` | Default count for upcoming agenda | `5` |
 | `detectionMode` | Inferred-capture policy | `confirm_first` |
 
@@ -64,4 +64,3 @@ npm test
 - Reminders are written through OpenClaw's exported cron-store runtime.
 - Storage uses Node's built-in `node:sqlite`, so Node 22+ is required.
 - Agenda output is intentionally compact for Telegram-like chat surfaces.
-

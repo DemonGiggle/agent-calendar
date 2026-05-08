@@ -26,8 +26,7 @@
       },
       "defaultTimezone": {
         "type": "string",
-        "description": "Default IANA timezone for calendar parsing and formatting.",
-        "default": "UTC"
+        "description": "Default IANA timezone for calendar parsing and formatting. If omitted, the current system timezone is used."
       },
       "defaultAgendaLimit": {
         "type": "integer",
@@ -43,4 +42,3 @@
     }
   }
 }
-

@@ -9,6 +9,11 @@ export interface CalendarPluginConfig {
   detectionMode: DetectionMode;
 }
 
+export function resolveSystemTimezone(): string {
+  const resolved = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return typeof resolved === "string" && resolved.trim().length > 0 ? resolved : "UTC";
+}
+
 export const calendarPluginConfigJsonSchema = {
   type: "object",
   additionalProperties: false,
@@ -19,8 +24,7 @@ export const calendarPluginConfigJsonSchema = {
     },
     defaultTimezone: {
       type: "string",
-      default: "UTC",
-      description: "Default IANA timezone for parsing and formatting.",
+      description: "Default IANA timezone for parsing and formatting. If omitted, the current system timezone is used.",
     },
     defaultAgendaLimit: {
       type: "integer",
@@ -47,10 +51,11 @@ export function validateTimezone(timezone: string): string {
 
 export function parsePluginConfig(raw: unknown): CalendarPluginConfig {
   const input = (raw ?? {}) as Record<string, unknown>;
+  const systemTimezone = resolveSystemTimezone();
   const defaultTimezone = validateTimezone(
     typeof input.defaultTimezone === "string" && input.defaultTimezone.trim().length > 0
       ? input.defaultTimezone.trim()
-      : "UTC",
+      : systemTimezone,
   );
   const defaultAgendaLimit =
     typeof input.defaultAgendaLimit === "number" &&
@@ -87,4 +92,3 @@ export function resolveDatabasePath(params: {
 
   return path.join(params.stateDir, "agent-calendar.sqlite");
 }
-
