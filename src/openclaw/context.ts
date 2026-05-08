@@ -1,4 +1,4 @@
-import { stripTargetKindPrefix } from "openclaw/plugin-sdk/core";
+import { stripChannelTargetPrefix, stripTargetKindPrefix } from "openclaw/plugin-sdk/core";
 import type { OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry";
 
 export interface OwnerScope {
@@ -14,15 +14,22 @@ export interface OwnerScope {
 export interface InboundOwnerContext {
   conversationId?: string;
   senderId?: string;
+  deliveryTarget?: string;
+  originatingTarget?: string;
 }
 
 function readNonBlankString(value: string | undefined): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
-function normalizeOwnerIdentifier(value: string | undefined): string | undefined {
+function normalizeOwnerIdentifier(channel: string, value: string | undefined): string | undefined {
   const normalized = readNonBlankString(value);
-  return normalized ? stripTargetKindPrefix(normalized) : undefined;
+  if (!normalized) {
+    return undefined;
+  }
+
+  const withoutProvider = stripChannelTargetPrefix(normalized, channel);
+  return stripTargetKindPrefix(withoutProvider);
 }
 
 function preferGroupOwnerKey(params: {
@@ -30,27 +37,31 @@ function preferGroupOwnerKey(params: {
   accountId?: string;
   senderId?: string;
   conversationId?: string;
+  originatingTarget?: string;
   target?: string;
 }): string | undefined {
   const accountKey = params.accountId ?? "default";
-  const senderId = normalizeOwnerIdentifier(params.senderId);
-  const conversationId = normalizeOwnerIdentifier(params.conversationId);
-  const fallbackTarget = normalizeOwnerIdentifier(params.target);
+  const senderId = normalizeOwnerIdentifier(params.channel, params.senderId);
+  const groupCandidates = [
+    normalizeOwnerIdentifier(params.channel, params.originatingTarget),
+    normalizeOwnerIdentifier(params.channel, params.conversationId),
+    normalizeOwnerIdentifier(params.channel, params.target),
+  ].filter((value): value is string => Boolean(value));
 
-  if (conversationId && senderId && conversationId !== senderId) {
-    return `target:${params.channel}:${accountKey}:${conversationId}`;
+  for (const candidate of groupCandidates) {
+    if (candidate && senderId && candidate !== senderId) {
+      return `target:${params.channel}:${accountKey}:${candidate}`;
+    }
   }
 
   if (senderId) {
     return `sender:${params.channel}:${accountKey}:${senderId}`;
   }
 
-  if (conversationId) {
-    return `target:${params.channel}:${accountKey}:${conversationId}`;
-  }
-
-  if (fallbackTarget) {
-    return `target:${params.channel}:${accountKey}:${fallbackTarget}`;
+  for (const candidate of groupCandidates) {
+    if (candidate) {
+      return `target:${params.channel}:${accountKey}:${candidate}`;
+    }
   }
 
   return undefined;
@@ -71,6 +82,7 @@ export function resolveOwnerScope(
       accountId,
       senderId,
       conversationId: inboundContext?.conversationId,
+      originatingTarget: inboundContext?.originatingTarget,
       target,
     }) ??
     (ctx.sessionKey
@@ -89,6 +101,22 @@ export function resolveOwnerScope(
           }
         : undefined,
   };
+}
+
+export function buildOwnerResolutionDebug(params: {
+  ownerKey: string;
+  toolContext: OpenClawPluginToolContext;
+  inboundContext?: InboundOwnerContext;
+}): string {
+  return [
+    `ownerKey=${params.ownerKey}`,
+    `channel=${params.toolContext.deliveryContext?.channel ?? params.toolContext.messageChannel ?? "unknown"}`,
+    `senderId=${params.toolContext.requesterSenderId ?? params.inboundContext?.senderId ?? "none"}`,
+    `conversationId=${params.inboundContext?.conversationId ?? "none"}`,
+    `originatingTarget=${params.inboundContext?.originatingTarget ?? "none"}`,
+    `deliveryTarget=${params.toolContext.deliveryContext?.to ?? "none"}`,
+    `sessionKey=${params.toolContext.sessionKey ?? "none"}`,
+  ].join(" ");
 }
 
 export function buildCalendarPromptGuidance(params: {
