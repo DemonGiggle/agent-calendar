@@ -1,0 +1,39 @@
+{
+  "name": "agent-calendar",
+  "version": "0.1.0",
+  "description": "OpenClaw calendar plugin with reusable core modules",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test tests/**/*.test.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "private": true,
+  "openclaw": {
+    "extensions": [
+      "./src/index.ts"
+    ],
+    "runtimeExtensions": [
+      "./dist/index.js"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.5.7",
+      "minGatewayVersion": ">=2026.5.7"
+    },
+    "build": {
+      "openclawVersion": "2026.5.7",
+      "pluginSdkVersion": "2026.5.7"
+    }
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.49",
+    "openclaw": "^2026.5.7"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.2",
+    "typescript": "^6.0.3"
+  }
+}

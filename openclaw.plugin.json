@@ -1,0 +1,46 @@
+{
+  "id": "agent-calendar",
+  "name": "Agent Calendar",
+  "description": "Calendar plugin with reusable core modules, reminders, and OpenClaw integration.",
+  "contracts": {
+    "tools": [
+      "cal_candidate_detect",
+      "cal_entry_create",
+      "cal_entry_update",
+      "cal_entry_delete",
+      "cal_agenda_upcoming",
+      "cal_agenda_day",
+      "cal_entry_search"
+    ]
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "dbPath": {
+        "type": "string",
+        "description": "Optional path to the SQLite database file."
+      },
+      "defaultTimezone": {
+        "type": "string",
+        "description": "Default IANA timezone for calendar parsing and formatting.",
+        "default": "UTC"
+      },
+      "defaultAgendaLimit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 20,
+        "default": 5
+      },
+      "detectionMode": {
+        "type": "string",
+        "enum": ["confirm_first", "auto_save_high_confidence"],
+        "default": "confirm_first"
+      }
+    }
+  }
+}
+
