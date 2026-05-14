@@ -32,6 +32,7 @@ The internal `core/` modules are kept OpenClaw-light so they can be extracted la
 ## Detection behavior
 
 The plugin adds prompt guidance through `before_prompt_build` when the latest prompt looks calendar-related.
+Cron-launched scheduler turns are excluded so ordinary scheduled jobs do not accidentally pick up calendar guidance.
 
 Current policy:
 

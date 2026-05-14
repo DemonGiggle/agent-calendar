@@ -137,3 +137,14 @@ export function looksCalendarRelevant(prompt: string): boolean {
     prompt,
   );
 }
+
+export function shouldInjectCalendarPromptGuidance(params: {
+  prompt: string;
+  jobId?: string;
+}): boolean {
+  if (readNonBlankString(params.jobId)) {
+    return false;
+  }
+
+  return looksCalendarRelevant(params.prompt);
+}

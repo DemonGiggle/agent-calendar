@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildOwnerResolutionDebug, resolveOwnerScope } from "../dist/openclaw/context.js";
+import {
+  buildOwnerResolutionDebug,
+  resolveOwnerScope,
+  shouldInjectCalendarPromptGuidance,
+} from "../dist/openclaw/context.js";
 
 test("resolveOwnerScope prefers group target ids when present", () => {
   const result = resolveOwnerScope({
@@ -71,4 +75,23 @@ test("buildOwnerResolutionDebug includes the normalized decision inputs", () => 
 
   assert.match(debug, /ownerKey=target:telegram:default:-100123456/);
   assert.match(debug, /originatingTarget=telegram:-100123456/);
+});
+
+test("shouldInjectCalendarPromptGuidance matches calendar-like chat prompts", () => {
+  assert.equal(
+    shouldInjectCalendarPromptGuidance({
+      prompt: "Schedule lunch with Sam tomorrow at 12:30",
+    }),
+    true,
+  );
+});
+
+test("shouldInjectCalendarPromptGuidance ignores cron-launched prompts", () => {
+  assert.equal(
+    shouldInjectCalendarPromptGuidance({
+      prompt: "Schedule lunch with Sam tomorrow at 12:30",
+      jobId: "cron-job-123",
+    }),
+    false,
+  );
 });

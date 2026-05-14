@@ -21,7 +21,7 @@ import type { CalendarEntry, RecurrenceSpec } from "./core/types.js";
 import {
   buildOwnerResolutionDebug,
   buildCalendarPromptGuidance,
-  looksCalendarRelevant,
+  shouldInjectCalendarPromptGuidance,
   resolveOwnerScope,
 } from "./openclaw/context.js";
 import {
@@ -452,8 +452,13 @@ export default definePluginEntry({
       pluginConfig.defaultAgendaLimit,
     );
 
-    api.on("before_prompt_build", (event) => {
-      if (!looksCalendarRelevant(event.prompt)) {
+    api.on("before_prompt_build", (event, ctx) => {
+      if (
+        !shouldInjectCalendarPromptGuidance({
+          prompt: event.prompt,
+          jobId: ctx.jobId,
+        })
+      ) {
         return;
       }
 
