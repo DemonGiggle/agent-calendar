@@ -10,6 +10,15 @@ export interface CalendarPluginConfig {
   detectionMode: DetectionMode;
 }
 
+type StateDirResolver =
+  | string
+  | {
+      resolveStateDir?: () => string;
+      stateDir?: string;
+      dir?: string;
+    }
+  | undefined;
+
 export function resolveSystemTimezone(): string {
   const resolved = Intl.DateTimeFormat().resolvedOptions().timeZone;
   return typeof resolved === "string" && resolved.trim().length > 0 ? resolved : "UTC";
@@ -107,4 +116,37 @@ export function resolveDatabasePath(params: {
   }
 
   return path.join(params.stateDir, "agent-calendar.sqlite");
+}
+
+export function resolvePluginStateDir(runtime: unknown, pluginId: string): string {
+  const record = (runtime ?? {}) as Record<string, unknown>;
+  const directResolver = record.resolveStateDir;
+  if (typeof directResolver === "function") {
+    return path.join(directResolver(), pluginId);
+  }
+
+  const stateCandidate = record.state as StateDirResolver;
+  if (typeof stateCandidate === "string" && stateCandidate.trim().length > 0) {
+    return path.join(stateCandidate, pluginId);
+  }
+  if (stateCandidate && typeof stateCandidate === "object") {
+    if (typeof stateCandidate.resolveStateDir === "function") {
+      return path.join(stateCandidate.resolveStateDir(), pluginId);
+    }
+    if (typeof stateCandidate.stateDir === "string" && stateCandidate.stateDir.trim().length > 0) {
+      return path.join(stateCandidate.stateDir, pluginId);
+    }
+    if (typeof stateCandidate.dir === "string" && stateCandidate.dir.trim().length > 0) {
+      return path.join(stateCandidate.dir, pluginId);
+    }
+  }
+
+  const runtimeStateDir = record.stateDir;
+  if (typeof runtimeStateDir === "string" && runtimeStateDir.trim().length > 0) {
+    return path.join(runtimeStateDir, pluginId);
+  }
+
+  throw new Error(
+    `OpenClaw runtime did not expose a plugin state directory. Expected runtime.resolveStateDir(), runtime.state.resolveStateDir(), or a stateDir string.`,
+  );
 }

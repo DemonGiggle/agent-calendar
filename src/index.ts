@@ -1,5 +1,3 @@
-import path from "node:path";
-
 import { Type } from "@sinclair/typebox";
 import {
   buildJsonPluginConfigSchema,
@@ -14,6 +12,7 @@ import {
   calendarPluginConfigJsonSchema,
   parsePluginConfig,
   resolveDatabasePath,
+  resolvePluginStateDir,
 } from "./core/config.js";
 import { SQLiteCalendarRepository } from "./core/repository.js";
 import { CalendarService } from "./core/service.js";
@@ -439,7 +438,7 @@ export default definePluginEntry({
         originatingTarget?: string;
       }
     >();
-    const stateDir = path.join(api.runtime.state.resolveStateDir(), PLUGIN_ID);
+    const stateDir = resolvePluginStateDir(api.runtime, PLUGIN_ID);
     const repository = new SQLiteCalendarRepository(
       resolveDatabasePath({
         configuredPath: pluginConfig.dbPath,
